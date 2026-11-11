@@ -1,0 +1,67 @@
+name: Build unsigned iOS IPA (TrollStore)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios-ipa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Decode app icon and generate sizes
+        run: |
+          cd ios/App/Resources
+          base64 -d AppIcon-1024.png.b64 > AppIcon-1024.png
+          ICONSET=Assets.xcassets/AppIcon.appiconset
+          mkdir -p "$ICONSET"
+          for px in 20 29 40 58 60 76 80 87 120 152 167 180 1024; do
+            sips -z "$px" "$px" AppIcon-1024.png --out "$ICONSET/Icon-$px.png" > /dev/null
+          done
+          ls "$ICONSET"
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: cd ios && xcodegen generate
+
+      - name: Build unsigned app
+        run: |
+          cd ios
+          xcodebuild -project FMO-X.xcodeproj -target FMO-X -sdk iphoneos -configuration Release CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" -derivedDataPath build
+
+      - name: Package IPA
+        run: |
+          APP_PATH=$(find ios/build/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
+          test -n "$APP_PATH"
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -r FMO-X-1.6.6-ios-unsigned.ipa Payload
+          ls -lh FMO-X-1.6.6-ios-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FMO-X-1.6.6-ios-unsigned
+          path: FMO-X-1.6.6-ios-unsigned.ipa
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view ios-1.6.6 >/dev/null 2>&1; then
+            gh release upload ios-1.6.6 FMO-X-1.6.6-ios-unsigned.ipa --clobber
+          else
+            gh release create ios-1.6.6 --title "FMO-X iOS 1.6.6 (unsigned, TrollStore)" --notes "未签名 IPA，巨魔（TrollStore）直接安装。最低支持 iOS 14.0。界面与安卓版 FMO-X 1.6.6 一致（7 种动画、呼号牌、BG5DRT 致谢）。" FMO-X-1.6.6-ios-unsigned.ipa
+          fi
