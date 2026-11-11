@@ -21,7 +21,7 @@ jobs:
       - name: Decode app icon and generate sizes
         run: |
           cd ios/App/Resources
-          base64 -d AppIcon-1024.png.b64 > AppIcon-1024.png
+          python3 -c "import base64; open('AppIcon-1024.png','wb').write(base64.b64decode(open('AppIcon-1024.png.b64').read()))"
           ICONSET=Assets.xcassets/AppIcon.appiconset
           mkdir -p "$ICONSET"
           for px in 20 29 40 58 60 76 80 87 120 152 167 180 1024; do
