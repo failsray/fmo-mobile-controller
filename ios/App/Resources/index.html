@@ -93,7 +93,8 @@
 
         html {
             background-color: #121212; /* 默认深色背景，防止白边 */
-            height: 100%;
+            height: 100vh;
+            height: 100dvh;
             overflow: hidden;
         }
 
@@ -101,7 +102,9 @@
             background-color: var(--bg-color);
             color: var(--text-main);
             font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            height: 100%;
+            /* 全屏自适应：用视口单位定高；height:100% 在 iOS WKWebView 里顶不满视口，频谱区不会伸长 */
+            height: 100vh;
+            height: 100dvh;
             width: 100%;
             display: grid;
             grid-template-rows: auto auto 1fr auto; /* Header, Settings, Viz, Controls */
