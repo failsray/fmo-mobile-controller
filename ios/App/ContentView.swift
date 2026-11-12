@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import AVFoundation
 
 struct ContentView: View {
     var body: some View {
@@ -50,6 +51,7 @@ class WebViewControllerImpl: UIViewController {
     let coordinator: WebViewController.Coordinator
     var webView: WKWebView!
     private var didLoadPage = false
+    private var audioObservers: [NSObjectProtocol] = []
 
     init(coordinator: WebViewController.Coordinator) {
         self.coordinator = coordinator
@@ -72,6 +74,18 @@ class WebViewControllerImpl: UIViewController {
         let prefs = WKWebpagePreferences()
         prefs.allowsContentJavaScript = true
         config.defaultWebpagePreferences = prefs
+        // Audio fix (build 15): Web Audio API is muted by the silent
+        // switch and in the background on iOS 16 (WebKit bugs 237322
+        // and 251532). A silent looping <audio> element opens the
+        // media channel so the radio plays through the switch and
+        // keeps the media-playback assertion alive in the background;
+        // navigator.audioSession covers iOS 17+. The page itself
+        // (index.html) is untouched.
+        config.userContentController.addUserScript(
+            WKUserScript(source: Self.audioFixScript,
+                         injectionTime: .atDocumentEnd,
+                         forMainFrameOnly: true)
+        )
 
         webView = WKWebView(frame: view.bounds, configuration: config)
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -92,6 +106,31 @@ class WebViewControllerImpl: UIViewController {
         if let url = Bundle.main.url(forResource: "index", withExtension: "html") {
             webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
             didLoadPage = true
+        }
+
+        // Keep the audio session in playback mode when the app returns
+        // to the foreground and after an interruption (for example a
+        // phone call) ends, so the radio keeps playing through the
+        // silent switch and in the background.
+        audioObservers.append(NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil, queue: .main
+        ) { _ in Self.configureAudioSession() })
+        audioObservers.append(NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil, queue: .main
+        ) { note in
+            guard let info = note.userInfo,
+                  let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: typeValue),
+                  type == .ended else { return }
+            Self.configureAudioSession()
+        })
+    }
+
+    deinit {
+        for observer in audioObservers {
+            NotificationCenter.default.removeObserver(observer)
         }
     }
 
@@ -139,4 +178,42 @@ class WebViewControllerImpl: UIViewController {
         let js = "document.documentElement.style.height='\(Int(h))px';document.body.style.height='\(Int(h))px';"
         webView.evaluateJavaScript(js, completionHandler: nil)
     }
+
+    /// Re-activate the playback audio session (same setup as App.swift).
+    static func configureAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playback, mode: .default, options: [])
+            try session.setActive(true)
+        } catch {
+            print("Audio session re-activation failed: \(error)")
+        }
+    }
+
+    /// JS injected into the page (build 15). See the comment at the
+    /// user-script registration in viewDidLoad.
+    static let audioFixScript = """
+    (function() {
+      try { if (navigator.audioSession) { navigator.audioSession.type = 'playback'; } } catch (e) {}
+      var el = document.createElement('audio');
+      el.src = 'data:audio/wav;base64,UklGRmQGAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YUAGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+      el.loop = true;
+      el.volume = 0;
+      el.setAttribute('playsinline', '');
+      el.style.display = 'none';
+      document.documentElement.appendChild(el);
+      function start() { try { var p = el.play(); if (p && p.catch) { p.catch(function(){}); } } catch (e) {} }
+      function unlockPlayer() { try { if (typeof player !== 'undefined' && player && player.unlock) { player.unlock(); } } catch (e) {} }
+      start();
+      document.addEventListener('pointerdown', function() { start(); unlockPlayer(); });
+      document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) {
+          try { if (navigator.audioSession) { navigator.audioSession.type = 'playback'; } } catch (e) {}
+          start();
+          unlockPlayer();
+        }
+      });
+      window.addEventListener('pageshow', function() { start(); unlockPlayer(); });
+    })();
+    """
 }
