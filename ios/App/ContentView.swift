@@ -30,8 +30,14 @@ struct WebView: UIViewRepresentable {
         webView.isOpaque = false
         webView.backgroundColor = .black
 
-        if let url = Bundle.main.url(forResource: "index", withExtension: "html") {
-            webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        // Defer the first load until after the first layout pass:
+        // loading immediately here can make WebKit measure the page
+        // against the pre-layout (near-zero) frame, so viewport units
+        // get stuck small and the first launch is not fullscreen.
+        DispatchQueue.main.async {
+            if let url = Bundle.main.url(forResource: "index", withExtension: "html") {
+                webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+            }
         }
         return webView
     }
