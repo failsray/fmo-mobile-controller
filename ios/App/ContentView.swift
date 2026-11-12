@@ -74,13 +74,16 @@ class WebViewControllerImpl: UIViewController {
         let prefs = WKWebpagePreferences()
         prefs.allowsContentJavaScript = true
         config.defaultWebpagePreferences = prefs
-        // Audio fix (build 15): Web Audio API is muted by the silent
-        // switch and in the background on iOS 16 (WebKit bugs 237322
-        // and 251532). A silent looping <audio> element opens the
-        // media channel so the radio plays through the switch and
-        // keeps the media-playback assertion alive in the background;
-        // navigator.audioSession covers iOS 17+. The page itself
-        // (index.html) is untouched.
+        // Audio fix (build 16): the page now routes the radio through
+        // a MediaStreamAudioDestinationNode into an <audio> element
+        // (media channel), so it plays through the silent switch and
+        // in the background / with the screen locked (WebKit bugs
+        // 237322 and 251532). The injected script only declares the
+        // playback audio session (iOS 17+) and resumes the player
+        // (AudioContext + media element) on gestures and when the
+        // page becomes visible again. The build 15 silent looping
+        // <audio> is gone: the real radio audio is now on the media
+        // channel, so a silent one adds nothing.
         config.userContentController.addUserScript(
             WKUserScript(source: Self.audioFixScript,
                          injectionTime: .atDocumentEnd,
@@ -108,23 +111,34 @@ class WebViewControllerImpl: UIViewController {
             didLoadPage = true
         }
 
-        // Keep the audio session in playback mode when the app returns
-        // to the foreground and after an interruption (for example a
-        // phone call) ends, so the radio keeps playing through the
-        // silent switch and in the background.
+        // Keep the audio session in playback mode and resume the page
+        // audio when the app returns to the foreground and after an
+        // interruption (for example a phone call) ends. Order matters
+        // (build 16): activate the session FIRST, then resume the
+        // page audio, otherwise the resume happens while the session
+        // is still inactive and the radio stays silent until the
+        // next background/foreground cycle.
         audioObservers.append(NotificationCenter.default.addObserver(
             forName: UIApplication.willEnterForegroundNotification,
             object: nil, queue: .main
         ) { _ in Self.configureAudioSession() })
         audioObservers.append(NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Self.configureAudioSession()
+            self?.resumePageAudio()
+        })
+        audioObservers.append(NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
             object: nil, queue: .main
-        ) { note in
+        ) { [weak self] note in
             guard let info = note.userInfo,
                   let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
                   let type = AVAudioSession.InterruptionType(rawValue: typeValue),
                   type == .ended else { return }
             Self.configureAudioSession()
+            self?.resumePageAudio()
         })
     }
 
@@ -179,6 +193,16 @@ class WebViewControllerImpl: UIViewController {
         webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
+    /// Ask the page to resume its audio (AudioContext + media
+    /// element). Call only after the audio session is active.
+    private func resumePageAudio() {
+        guard didLoadPage else { return }
+        webView.evaluateJavaScript(
+            "if (typeof player !== 'undefined' && player && player.unlock) { player.unlock(); }",
+            completionHandler: nil
+        )
+    }
+
     /// Re-activate the playback audio session (same setup as App.swift).
     static func configureAudioSession() {
         let session = AVAudioSession.sharedInstance()
@@ -190,30 +214,20 @@ class WebViewControllerImpl: UIViewController {
         }
     }
 
-    /// JS injected into the page (build 15). See the comment at the
+    /// JS injected into the page (build 16). See the comment at the
     /// user-script registration in viewDidLoad.
     static let audioFixScript = """
     (function() {
       try { if (navigator.audioSession) { navigator.audioSession.type = 'playback'; } } catch (e) {}
-      var el = document.createElement('audio');
-      el.src = 'data:audio/wav;base64,UklGRmQGAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YUAGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
-      el.loop = true;
-      el.volume = 0;
-      el.setAttribute('playsinline', '');
-      el.style.display = 'none';
-      document.documentElement.appendChild(el);
-      function start() { try { var p = el.play(); if (p && p.catch) { p.catch(function(){}); } } catch (e) {} }
       function unlockPlayer() { try { if (typeof player !== 'undefined' && player && player.unlock) { player.unlock(); } } catch (e) {} }
-      start();
-      document.addEventListener('pointerdown', function() { start(); unlockPlayer(); });
+      document.addEventListener('pointerdown', unlockPlayer);
       document.addEventListener('visibilitychange', function() {
         if (!document.hidden) {
           try { if (navigator.audioSession) { navigator.audioSession.type = 'playback'; } } catch (e) {}
-          start();
           unlockPlayer();
         }
       });
-      window.addEventListener('pageshow', function() { start(); unlockPlayer(); });
+      window.addEventListener('pageshow', unlockPlayer);
     })();
     """
 }

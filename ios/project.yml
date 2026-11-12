@@ -20,7 +20,7 @@ targets:
       properties:
         CFBundleDisplayName: FMO-X
         CFBundleShortVersionString: "1.6.6"
-        CFBundleVersion: "15"
+        CFBundleVersion: "16"
         LSRequiresIPhoneOS: true
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
@@ -34,7 +34,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.x.fmocontroller
         PRODUCT_NAME: FMO-X
         MARKETING_VERSION: 1.6.6
-        CURRENT_PROJECT_VERSION: 15
+        CURRENT_PROJECT_VERSION: 16
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

@@ -1321,6 +1321,8 @@
                 this.analyser = null;
                 this.gainNode = null;
                 this.hpfNode = null;
+                this.mediaStreamDest = null;
+                this.mediaAudio = null;
                 
                 // 缓冲调度相关
                 this.chunkQueue = [];
@@ -1352,10 +1354,19 @@
                     this.hpfNode.type = 'highpass';
                     this.hpfNode.frequency.value = 300;
 
-                    // 连线: Source -> Gain -> HPF -> Analyser -> Dest
+                    // 媒体通道 (build 16): Web Audio 走铃声通道，静音开关会静音它、
+                    // 切后台/锁屏也会停 (WebKit bug 237322/251532)。把声音改走
+                    // MediaStream -> <audio> 元素 (媒体通道)，静音/后台/锁屏都可播。
+                    // 连线: Source -> Gain -> HPF -> Analyser -> MediaStream -> <audio>
+                    this.mediaStreamDest = this.audioCtx.createMediaStreamDestination();
+                    this.mediaAudio = new Audio();
+                    this.mediaAudio.srcObject = this.mediaStreamDest.stream;
+                    this.mediaAudio.setAttribute('playsinline', '');
+                    this.mediaAudio.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;';
+                    document.body.appendChild(this.mediaAudio);
                     this.gainNode.connect(this.hpfNode);
                     this.hpfNode.connect(this.analyser);
-                    this.analyser.connect(this.audioCtx.destination);
+                    this.analyser.connect(this.mediaStreamDest);
                 }
                 if (this.audioCtx.state === 'suspended') {
                     try {
@@ -1372,11 +1383,17 @@
                         console.log('AudioContext resumed via user interaction');
                     }).catch(e => console.error(e));
                 }
+                if (this.mediaAudio && this.mediaAudio.paused) {
+                    this.mediaAudio.play().catch(function() {});
+                }
             }
 
             async connect(host) {
                 if (this.connected) return;
                 await this.ensureAudioContext();
+                if (this.mediaAudio) {
+                    this.mediaAudio.play().catch(function() {});
+                }
                 
                 // 重置状态
                 this.chunkQueue = [];
@@ -1412,6 +1429,9 @@
                 if (this.ws) {
                     this.ws.close();
                     this.ws = null;
+                }
+                if (this.mediaAudio) {
+                    this.mediaAudio.pause();
                 }
                 this.connected = false;
                 this.emit('status', false);
