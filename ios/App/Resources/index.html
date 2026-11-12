@@ -93,7 +93,8 @@
 
         html {
             background-color: #121212; /* 默认深色背景，防止白边 */
-            height: calc(var(--vh, 1vh) * 100);
+            height: 100vh;
+            height: 100dvh;
             overflow: hidden;
         }
 
@@ -101,8 +102,9 @@
             background-color: var(--bg-color);
             color: var(--text-main);
             font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            /* 全屏自适应：用 JS 同步的 --vh 定高；vh 单位在 WKWebView 首次加载时可能按初始小尺寸算死 */
-            height: calc(var(--vh, 1vh) * 100);
+            /* 全屏自适应：vh 单位由 WebKit 在重排时重算，重进能自愈；首次启动靠壳里等尺寸排好再加载 */
+            height: 100vh;
+            height: 100dvh;
             width: 100%;
             display: grid;
             grid-template-rows: auto auto 1fr auto; /* Header, Settings, Viz, Controls */
@@ -778,19 +780,6 @@
         }
 
     </style>
-    <script>
-        // 首屏视口高度同步：WKWebView 首次加载时 vh 可能按初始小尺寸算死，
-        // 用 JS 实时取 window.innerHeight 写进 --vh，尺寸变化时再同步一次。
-        (function () {
-            function syncVH() {
-                document.documentElement.style.setProperty('--vh', (window.innerHeight * 0.01) + 'px');
-            }
-            syncVH();
-            window.addEventListener('resize', syncVH);
-            window.addEventListener('orientationchange', syncVH);
-            window.addEventListener('load', syncVH);
-        })();
-    </script>
 </head>
 <body>
 
