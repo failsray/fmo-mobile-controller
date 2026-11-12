@@ -38,7 +38,7 @@ jobs:
       - name: Build unsigned app
         run: |
           cd ios
-          xcodebuild -project FMO-X.xcodeproj -scheme FMO-X -sdk iphoneos -configuration Release CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" -derivedDataPath build
+          xcodebuild -project FMO-X.xcodeproj -scheme FMO-X -sdk iphoneos -configuration Release CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" -derivedDataPath build INFOPLIST_FILE=App/Info.plist GENERATE_INFOPLIST_FILE=NO
 
       - name: Package IPA
         run: |
