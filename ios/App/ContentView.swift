@@ -71,6 +71,29 @@ struct WebView: UIViewRepresentable {
 
     class Coordinator: NSObject, WKUIDelegate, WKNavigationDelegate {
         var didLoad = false
+        private var didSelfCheck = false
+
+        // First launch: WebKit can lay the page out against a window
+        // that has not settled yet, so the page comes out short — even
+        // when the load itself waited for a real size. Returning from
+        // the background fixes it, which proves a fresh layout with the
+        // settled geometry is fullscreen. So, once, shortly after the
+        // first load, measure the page: if the body is shorter than the
+        // web view, reload once with the settled geometry.
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard !didSelfCheck else { return }
+            didSelfCheck = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak webView] in
+                guard let webView = webView else { return }
+                webView.evaluateJavaScript("document.body ? document.body.clientHeight : 0") { result, _ in
+                    let bodyH = (result as? NSNumber)?.doubleValue ?? 0
+                    let viewH = Double(webView.bounds.height)
+                    if viewH > 0 && bodyH > 0 && bodyH < viewH - 20 {
+                        webView.reload()
+                    }
+                }
+            }
+        }
 
         // Open external links (for example the GitHub credit link) in
         // Safari instead of inside the controller.
