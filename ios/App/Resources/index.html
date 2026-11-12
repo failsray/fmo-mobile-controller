@@ -93,8 +93,7 @@
 
         html {
             background-color: #121212; /* 默认深色背景，防止白边 */
-            height: 100vh;
-            height: 100dvh;
+            height: 100%;
             overflow: hidden;
         }
 
@@ -102,9 +101,7 @@
             background-color: var(--bg-color);
             color: var(--text-main);
             font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            /* 全屏自适应：vh 单位由 WebKit 在重排时重算，重进能自愈；首次启动靠壳里等尺寸排好再加载 */
-            height: 100vh;
-            height: 100dvh;
+            height: 100%;
             width: 100%;
             display: grid;
             grid-template-rows: auto auto 1fr auto; /* Header, Settings, Viz, Controls */
