@@ -1,0 +1,68 @@
+name: Build unsigned Windows app (Win7+)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'windows/**'
+      - 'ios/App/Resources/index.html'
+      - 'ios/App/Resources/AppIcon-1024.png.b64'
+      - '.github/workflows/windows-app.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Copy page and icon from iOS project
+        shell: bash
+        run: |
+          cp ios/App/Resources/index.html windows/app/index.html
+          python -c "import base64; open('windows/app/icon.png','wb').write(base64.b64decode(open('ios/App/Resources/AppIcon-1024.png.b64').read()))"
+          ls -lh windows/app/index.html windows/app/icon.png
+
+      - name: Build Windows icon
+        shell: bash
+        run: |
+          pip install pillow
+          python windows/scripts/make-ico.py
+          ls -lh windows/app/icon.ico
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: windows
+        run: npm install
+
+      - name: Build installer
+        shell: bash
+        working-directory: windows
+        run: npm run dist
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FMO-X-1.6.6-windows
+          path: windows/dist/FMO-X-1.6.6-windows-setup.exe
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view windows-1.6.6 >/dev/null 2>&1; then
+            gh release upload windows-1.6.6 windows/dist/FMO-X-1.6.6-windows-setup.exe --clobber
+          else
+            gh release create windows-1.6.6 --title "FMO-X Windows 1.6.6 (unsigned)" --notes "未签名安装包，Windows 7 及以上可用。装好打开即用，默认连 192.168.110.198；外网填外网地址。界面与安卓版 FMO-X 1.6.6 一致（7 种动画、呼号牌、BG5DRT 致谢）。" windows/dist/FMO-X-1.6.6-windows-setup.exe
+          fi

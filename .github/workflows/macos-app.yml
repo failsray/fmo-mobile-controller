@@ -1,0 +1,73 @@
+name: Build unsigned macOS app (10.15+)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'macos/**'
+      - 'ios/App/Resources/index.html'
+      - 'ios/App/Resources/AppIcon-1024.png.b64'
+      - '.github/workflows/macos-app.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Copy page and icon from iOS project
+        run: |
+          cp ios/App/Resources/index.html macos/App/Resources/index.html
+          cp ios/App/Resources/AppIcon-1024.png.b64 macos/App/Resources/AppIcon-1024.png.b64
+          ls -lh macos/App/Resources/index.html
+
+      - name: Decode app icon and generate sizes
+        run: |
+          cd macos/App/Resources
+          python3 -c "import base64; open('AppIcon-1024.png','wb').write(base64.b64decode(open('AppIcon-1024.png.b64').read()))"
+          ICONSET=Assets.xcassets/AppIcon.appiconset
+          mkdir -p "$ICONSET"
+          for px in 16 32 64 128 256 512 1024; do
+            sips -z "$px" "$px" AppIcon-1024.png --out "$ICONSET/Icon-$px.png" > /dev/null
+          done
+          ls "$ICONSET"
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: cd macos && xcodegen generate
+
+      - name: Build unsigned app
+        run: |
+          cd macos
+          xcodebuild -project FMO-X.xcodeproj -scheme FMO-X -configuration Release CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" -derivedDataPath build INFOPLIST_FILE=App/Info.plist GENERATE_INFOPLIST_FILE=NO
+
+      - name: Package app
+        run: |
+          APP_PATH=$(find macos/build/Build/Products/Release -maxdepth 1 -name "*.app" | head -n 1)
+          test -n "$APP_PATH"
+          ditto -c -k --keepParent "$APP_PATH" FMO-X-1.6.6-macos-unsigned.zip
+          ls -lh FMO-X-1.6.6-macos-unsigned.zip
+
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FMO-X-1.6.6-macos-unsigned
+          path: FMO-X-1.6.6-macos-unsigned.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view macos-1.6.6 >/dev/null 2>&1; then
+            gh release upload macos-1.6.6 FMO-X-1.6.6-macos-unsigned.zip --clobber
+          else
+            gh release create macos-1.6.6 --title "FMO-X macOS 1.6.6 (unsigned)" --notes "未签名 .app，macOS 10.15 及以上可用，首次打开请右键－打开。界面与安卓版 FMO-X 1.6.6 一致（7 种动画、呼号牌、BG5DRT 致谢）。" FMO-X-1.6.6-macos-unsigned.zip
+          fi
