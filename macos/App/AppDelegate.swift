@@ -13,7 +13,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let config = WKWebViewConfiguration()
-        config.allowsInlineMediaPlayback = true
+        // NOTE: allowsInlineMediaPlayback is iOS-only; on macOS
+        // WKWebView plays media inline by default, so it is not set here.
+        // (Adding it breaks the macOS build: 'no member allowsInlineMediaPlayback'.)
         if #available(macOS 11.0, *) {
             // Let the page start audio without an extra tap (same as iOS).
             config.mediaTypesRequiringUserActionForPlayback = []
