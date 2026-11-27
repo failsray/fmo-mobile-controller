@@ -25,6 +25,7 @@ jobs:
         run: |
           mkdir -p windows/app
           cp ios/App/Resources/index.html windows/app/index.html
+          python -c "p='windows/app/index.html'; open(p,'wb').write(open(p,'rb').read().replace(b'\r\n', b'\n'))"
           python -c "import base64; open('windows/app/icon.png','wb').write(base64.b64decode(open('ios/App/Resources/AppIcon-1024.png.b64').read()))"
           ls -lh windows/app/index.html windows/app/icon.png
 
